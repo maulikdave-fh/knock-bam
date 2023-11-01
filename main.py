@@ -108,6 +108,10 @@ def brandisiiv1_2():
 @app.route("/")
 def index():
     return render_template("index.html")
+    
+@app.route("/brandisii" , methods = ['POST', 'GET'])
+def brandisii() :
+    return 'silence is beautiful'
 
 @app.route("/madhvaii")
 def madhvaii():
