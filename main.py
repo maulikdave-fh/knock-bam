@@ -138,42 +138,6 @@ def index():
     return render_template("index.html")
 
 
-
-@app.route("/brandisii", methods = ['POST'])
-def brandisii():
-    if request.method != 'POST':
-        return "invalid request"
-
-##    print(request.headers)
-##    print(request.files)
-##    print(request.data)
-
-    loaded_model = tf.keras.models.load_model("/home/foresthut/mysite/saved_models/brandisii_FCM.h5")
-
-    fIn = request.files['file']
-    filename = fIn.filename
-    #fIn.save(filename)
-    print("File name " , filename)
-
-
-    fOut = io.BytesIO()
-    #following adds necessary WAV file headers to RAW PCM file - necessary for librosa feature extraction to work
-    scipy.io.wavfile.write(fOut, 44100, np.fromfile(fIn, dtype=np.int16, count=-1))
-
-
-    mfccs_scaled_features = features_extractor(fOut)
-
-
-    mfccs_scaled_features = mfccs_scaled_features.reshape(1,-1)
-
-    predicted_label = loaded_model.predict(mfccs_scaled_features)
-    classes_x = np.argmax(predicted_label,axis=1)
-    print("Class-wise weightage - " , predicted_label)
-    print("input file name {} - prediction {}".format(fIn.filename, classes_x[0]))
-
-    return "Prediction for " + fIn.filename + " is " + str(classes_x[0])
-
-
 @app.route("/madhvaii")
 def madhvaii():
     return "silence is beautiful"
