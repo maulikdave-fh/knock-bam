@@ -3,60 +3,47 @@ import librosa
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 import tensorflow as tf
-import sys
-import wave
 import scipy
-import io
 import soundfile as sf
 from pydub import AudioSegment
 from collections import Counter
-from multiprocessing import Pool
 
 app = Flask(__name__)
 
-#loaded_model = tf.keras.models.load_model("/home/foresthut/mysite/saved_models/brandisii_FCM.h5")
+def getPredictions(samples, sample_rate):
+    peaks = scipy.signal.find_peaks(samples, height=0.1, distance = int(sample_rate/3))
 
-#Used by v1.1
-def createSegments(fName):
-    samples, sample_rate = librosa.load(fName, sr = 44100)
+    print ("No of peaks with scipy {}".format(len(peaks[0])))
 
-    print ("The audio has a sample rate of {}Hz with {} samples.".format(sample_rate, samples.shape[0]))
+    peaks_list = peaks[1]['peak_heights'].tolist()
 
-    C= np.abs(librosa.cqt(y=samples, sr=sample_rate))
-    o_env=librosa.onset.onset_strength(sr=sample_rate,S=librosa.amplitude_to_db(C,top_db=30))
-    onset_env0 = librosa.onset.onset_detect(onset_envelope=o_env, sr=sample_rate,units='time', backtrack=True)
-    print ("peaks (times) {} of size {}".format(onset_env0, len(onset_env0)))
+    predictions = []
+
+    for i, peak in enumerate(peaks_list) :
+        sample_no_at_peak = peaks[0][i]
+
+        start = int(sample_no_at_peak - (0.005 * sample_rate))
+        end = int(sample_no_at_peak  + (0.035 * sample_rate))
+
+        segment = samples [start : end]
+
+        #sf.write('{}_{}.wav'.format(f_suf, i), segment, sample_rate, subtype='PCM_16')
+        prediction = predict(segment, sample_rate)
+
+        print("Prediction ", prediction)
+        
+        if prediction != 'Unsure' :
+            predictions.append(prediction)
+
+    return predictions
 
 
-    audio = AudioSegment.from_wav(fName)
-    #print("Audio length (secs) {}".format(audio.duration_seconds))
+def predict(samples, sample_rate):
+    #loaded_model = tf.keras.models.load_model("saved_models/brandisii_FCM.h5")
+    loaded_model =  tf.keras.models.load_model("/home/foresthut/mysite/saved_models/brandisii_FCM.h5")
 
-    #j=0
-    segments = []
-    #Convert wav to audio_segment
-    for i, peak in enumerate(onset_env0) :
-
-        t1 = peak * 1000
-        t2 = t1  + 100
-        segment = audio[t1:t2]
-
-        #print ("start time - {} : end time - {} for id {} with difference {}".format(t1 , t2 , i , t2-t1))
-
-        sName = "/home/foresthut/mysite/tmp/segWav{}.wav".format(i)
-        #print("Storing segment {}".format(sName))
-        segment.export(sName, format="wav")
-        segments.append(sName)
-        #j=j+1
-
-    print("Total {} segmenets created.".format(len(segments)))
-    return segments
-
-#Used by v1.1
-def predict(fOut):
-    loaded_model = tf.keras.models.load_model("/home/foresthut/mysite/saved_models/brandisii_FCM.h5")
-
-    print("In predict {}".format(fOut))
-    mfccs_scaled_features = features_extractor(fOut)
+    print("In predict {}".format(len(samples)))
+    mfccs_scaled_features = features_extractor(samples, sample_rate)
 
 
     print("In predict {}".format(mfccs_scaled_features.shape))
@@ -68,18 +55,21 @@ def predict(fOut):
     array = np.array(predicted_label) * 100
 
     classes_x = np.argmax(predicted_label,axis=1)
+
+    if (np.max(array) < 90) :
+        result = 'Unsure'
+    else :
+        result = classes_x[0]
+
+    
     print("Class-wise weightage - " , array)
-    print("prediction {}".format(classes_x[0]))
+    print("prediction {}".format(result))
 
-    return str(classes_x[0])
+    return str(result)
 
-#Used by v1.1
-def features_extractor(f, n_mfccs=25):
-    print("In features extractor {}".format(f))
-    audio, sample_rate = librosa.load(f, sr=44100)
-    print("In features extractor - segment loaded {}".format(audio.shape))
-
-    mfccs_features = librosa.feature.mfcc(y=audio, sr=sample_rate, hop_length=1, n_mfcc= n_mfccs, dtype=np.float32)
+def features_extractor(samples, sample_rate, n_mfccs=28):
+    mfccs_features = librosa.feature.mfcc(y=samples, sr=sample_rate, hop_length= 256, win_length = 512, n_mfcc= n_mfccs, dtype=np.float32, n_fft=int(len(samples)/2))
+    print(mfccs_features.shape)
 
     scaler = StandardScaler()
     mfccs_features_norm = scaler.fit(mfccs_features)
@@ -89,8 +79,8 @@ def features_extractor(f, n_mfccs=25):
     return scaled_features
 
 
-@app.route("/brandisii/v1.1", methods = ['POST'])
-def brandisiiv1_1():
+@app.route("/brandisii/v1.2", methods = ['POST'])
+def brandisiiv1_2():
     if request.method != 'POST':
         return 'Invalid Request'
 
@@ -98,50 +88,30 @@ def brandisiiv1_1():
     filename = fPCM.filename
     print("---------------------------------------------------------------------------------")
 
-    fOutName = "/home/foresthut/mysite/tmp/{}.wav".format(filename.rsplit(".")[0])
-    scipy.io.wavfile.write(fOutName, 44100, np.fromfile(fPCM, dtype=np.int16, count=-1))
+    samples, sample_rate = sf.read(fPCM, channels=1, samplerate=44100, format = 'RAW', subtype='PCM_16', endian = 'LITTLE')
 
-    segments = []
-
-    segments = createSegments(fOutName)
-
-    print("Segments {}".format(segments))
-
-    predictions = []
-
-    #for segment in range(noOfSegments):
-    #    segments.append("/home/foresthut/mysite/tmp/segWav{}.wav".format(segment))
-
-    #with Pool(5) as p:
-    #    predictions = p.map(predict, segments)
-
-    for segment in range(len(segments)):
-       predictions.append(predict("/home/foresthut/mysite/tmp/segWav{}.wav".format(segment)))
+    predictions = getPredictions(samples, sample_rate)
 
     finalResult = 404
-
     print("Predictions {}".format(predictions))
-
     if (len(predictions) > 1) :
         counter = Counter(predictions)
         finalResult = counter.most_common()[0][0]
-    else:
+    elif len(predictions) == 1 :
         finalResult = predictions[0]
-
+    else :
+        finalResult = 'Unsure'
+    
     print("Final Result: {}".format(finalResult))
-
-    return "Predictions {} and Final Result {}".format(predictions, str(finalResult))
-
+    return str(finalResult)
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
-
 @app.route("/madhvaii")
 def madhvaii():
     return "silence is beautiful"
-
 
 if __name__ == "__main__":
     app.run()
